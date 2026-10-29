@@ -1,0 +1,89 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.xcscmblueprint
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Build output
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+*.xcresult
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+# Package.resolved is committed for reproducible app builds.
+.build/
+.swiftpm/
+Packages/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+Carthage/Checkouts/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code injection
+iOSInjectionProject/
+
+# Secrets and local configuration
+*.env
+.env*
+!.env.example
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.cer
+*.certSigningRequest
+Secrets.xcconfig
+*.local.xcconfig
+GoogleService-Info.plist
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Generated build inputs (see Scripts/). Never committed: FFmpeg binaries are
+# built by Scripts/build-ffmpeg.sh and the Core ML model by
+# Scripts/convert-model.py, locally or in CI.
+Vendor/
+VoiceEraser/Resources/Models/*.mlpackage
+.venv/
+__pycache__/
+*.pyc
