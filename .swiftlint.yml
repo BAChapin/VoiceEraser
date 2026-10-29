@@ -1,0 +1,77 @@
+# SwiftLint configuration for VoiceEraser.
+# Runs in CI (.github/workflows/ci.yml) with --strict, so warnings fail the job.
+# Locally: `swiftlint lint` from the repository root.
+
+included:
+  - VoiceEraser
+  - VoiceEraserKit/Sources
+  - VoiceEraserKit/Tests
+
+excluded:
+  - .build
+  - .spm-cache
+  - .derived-data
+  - DerivedData
+  - Vendor
+  - VoiceEraserKit/.build
+
+disabled_rules:
+  # Small labelled tuples (left/right channel pairs, mean/std) read better
+  # than one-off structs in the DSP code.
+  - large_tuple
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - closure_spacing
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - first_where
+  - last_where
+  - sorted_first_last
+  - redundant_nil_coalescing
+  - unneeded_parentheses_in_closure_argument
+  - vertical_whitespace_closing_braces
+
+line_length:
+  # 200 columns keeps long test assertions and SwiftUI prose on one line;
+  # interpolated user-facing strings are exempt rather than split mid-sentence.
+  warning: 200
+  error: 300
+  ignores_comments: true
+  ignores_urls: true
+  ignores_interpolated_strings: true
+
+identifier_name:
+  # Short names are fine for math, indices, and tuple elements (a, b, i, x).
+  min_length: 1
+  max_length:
+    warning: 50
+    error: 60
+
+function_parameter_count:
+  # Pipeline steps take their inputs explicitly rather than through one-off
+  # option structs.
+  warning: 7
+  error: 9
+
+function_body_length:
+  warning: 110
+  error: 150
+
+cyclomatic_complexity:
+  warning: 25
+  error: 35
+
+type_body_length:
+  warning: 300
+  error: 400
+
+file_length:
+  warning: 500
+  error: 1000
+
+trailing_comma:
+  # Multi-line collection literals end with a comma, so adding an element is a
+  # one-line diff.
+  mandatory_comma: true
