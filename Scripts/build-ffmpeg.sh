@@ -86,7 +86,8 @@ tar -xJf "$work/ffmpeg.tar.xz" -C "$work"
     --disable-ffplay --disable-doc --disable-network --disable-debug \
     --disable-indevs --disable-outdevs \
     --extra-cflags="$common_cflags -I$prefix/include" \
-    --extra-ldflags="-arch $ARCH -mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET -L$prefix/lib"
+    --extra-ldflags="-arch $ARCH -mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET -L$prefix/lib" \
+    --extra-libs="-liconv"
   make -j"$jobs"
   make install
 )
