@@ -104,91 +104,110 @@ public final class VoiceIsolationEngine: SpeechRemovalEngine, @unchecked Sendabl
     }
 }
 
-/// Renders mono audio through `AUSoundIsolation` offline.
+/// Renders mono audio through `AUSoundIsolation` offline: an `AVAudioEngine`
+/// in manual rendering mode, fed by a source node, with the audio unit
+/// between the source and the main mixer. (Calling the unit's render block
+/// directly fails with kAudioUnitErr_NoConnection: its v2 bridge only pulls
+/// input through a real connection.)
 final class VoiceIsolator {
+    private let engine = AVAudioEngine()
     private let effect: AVAudioUnitEffect
-    private let unit: AUAudioUnit
-    private let format: AVAudioFormat
+    private let feed: InputFeed
     private let blockSize: Int
-    let latencyFrames: Int
+    /// The audio unit's reported processing delay (set once the engine runs).
+    private(set) var latencyFrames = 0
 
     init(sampleRate: Double, blockSize: Int) throws {
-        effect = AVAudioUnitEffect(audioComponentDescription: VoiceIsolationEngine.componentDescription)
-        unit = effect.auAudioUnit
-        self.blockSize = blockSize
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
             throw SpeechRemovalError.audioUnitFailed("unsupported format")
         }
-        self.format = format
-        do {
-            try unit.inputBusses[0].setFormat(format)
-            try unit.outputBusses[0].setFormat(format)
-        } catch {
-            throw SpeechRemovalError.audioUnitFailed("it doesn't accept \(Int(sampleRate)) Hz mono audio (\(error.localizedDescription))")
-        }
-        unit.maximumFramesToRender = AUAudioFrameCount(blockSize)
+        self.blockSize = blockSize
+        effect = AVAudioUnitEffect(audioComponentDescription: VoiceIsolationEngine.componentDescription)
+        let feed = InputFeed()
+        self.feed = feed
         // Output only the isolated voice.
-        unit.parameterTree?.parameter(withAddress: AUParameterAddress(kAUSoundIsolationParam_WetDryMixPercent))?.value = 100
+        effect.auAudioUnit.parameterTree?.parameter(withAddress: AUParameterAddress(kAUSoundIsolationParam_WetDryMixPercent))?.value = 100
+
+        let source = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList in
+            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            if let data = buffers[0].mData?.assumingMemoryBound(to: Float.self) {
+                feed.fill(data, count: Int(frameCount))
+            }
+            return noErr
+        }
         do {
-            try unit.allocateRenderResources()
+            try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: AVAudioFrameCount(blockSize))
+            engine.attach(source)
+            engine.attach(effect)
+            engine.connect(source, to: effect, format: format)
+            engine.connect(effect, to: engine.mainMixerNode, format: format)
+            try engine.start()
         } catch {
             throw SpeechRemovalError.audioUnitFailed(error.localizedDescription)
         }
-        latencyFrames = max(0, Int((unit.latency * sampleRate).rounded()))
+        latencyFrames = max(0, Int((effect.auAudioUnit.latency * sampleRate).rounded()))
     }
 
     deinit {
-        unit.deallocateRenderResources()
+        engine.stop()
     }
 
     /// Renders `channel` of `input`, followed by silence, into `voice` (mono,
     /// longer than `input` so the delayed tail is captured).
     func render(channel: Int, of input: MappedPCMFile, into voice: MappedPCMFile, progress: (Double) -> Void) throws {
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(blockSize)) else {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: AVAudioFrameCount(blockSize)) else {
             throw SpeechRemovalError.audioUnitFailed("couldn't allocate buffers")
         }
-        let inputSamples = UnsafeMutablePointer<Float>.allocate(capacity: blockSize)
-        defer { inputSamples.deallocate() }
-        let source = UncheckedSendable(inputSamples)
+        feed.start(input: input, channel: channel)
+        defer { feed.stop() }
 
-        let pullInput: AURenderPullInputBlock = { _, _, frameCount, _, inputData in
-            let byteCount = Int(frameCount) * MemoryLayout<Float>.size
-            let buffers = UnsafeMutableAudioBufferListPointer(inputData)
-            for index in 0..<buffers.count {
-                if let data = buffers[index].mData {
-                    data.copyMemory(from: source.value, byteCount: byteCount)
-                } else {
-                    buffers[index].mData = UnsafeMutableRawPointer(source.value)
-                }
-                buffers[index].mDataByteSize = UInt32(byteCount)
-            }
-            return noErr
-        }
-
-        let renderBlock = unit.renderBlock
         let total = voice.frameCount
         var position = 0
-        var timestamp = AudioTimeStamp()
-        timestamp.mFlags = .sampleTimeValid
         while position < total {
             if Task.isCancelled { throw CancellationError() }
             let count = min(blockSize, total - position)
-            input.read(channel: channel, from: position, count: count, into: inputSamples)
-            outputBuffer.frameLength = AVAudioFrameCount(count)
-            timestamp.mSampleTime = Float64(position)
-            var flags = AudioUnitRenderActionFlags()
-            let status = renderBlock(&flags, &timestamp, AUAudioFrameCount(count), 0, outputBuffer.mutableAudioBufferList, pullInput)
-            guard status == noErr else {
-                throw SpeechRemovalError.audioUnitFailed("render error \(status)")
+            let status: AVAudioEngineManualRenderingStatus
+            do {
+                status = try engine.renderOffline(AVAudioFrameCount(count), to: buffer)
+            } catch {
+                throw SpeechRemovalError.audioUnitFailed(error.localizedDescription)
             }
-            let rendered = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
-            guard let data = rendered[0].mData else {
-                throw SpeechRemovalError.audioUnitFailed("no output")
+            let rendered = Int(buffer.frameLength)
+            guard status == .success, rendered > 0, let data = buffer.floatChannelData?[0] else {
+                throw SpeechRemovalError.audioUnitFailed("render status \(status.rawValue)")
             }
-            voice.write(channel: 0, at: position, count: count, from: data.assumingMemoryBound(to: Float.self))
-            position += count
+            voice.write(channel: 0, at: position, count: rendered, from: data)
+            position += rendered
             progress(Double(position) / Double(total))
         }
+    }
+}
+
+/// Supplies one channel of a mapped file to the engine's source node, then
+/// silence once the channel runs out. Only touched from the rendering thread
+/// while a render is in progress.
+private final class InputFeed: @unchecked Sendable {
+    private var input: MappedPCMFile?
+    private var channel = 0
+    private var position = 0
+
+    func start(input: MappedPCMFile, channel: Int) {
+        self.input = input
+        self.channel = channel
+        position = 0
+    }
+
+    func stop() {
+        input = nil
+    }
+
+    func fill(_ destination: UnsafeMutablePointer<Float>, count: Int) {
+        if let input {
+            input.read(channel: channel, from: position, count: count, into: destination)
+        } else {
+            destination.update(repeating: 0, count: count)
+        }
+        position += count
     }
 }
 
