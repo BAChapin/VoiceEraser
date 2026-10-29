@@ -158,7 +158,8 @@ struct VoiceIsolationEngineTests {
         try await VoiceIsolationEngine().removeSpeech(input: input, output: output) { _ in }
 
         #expect(output.frameCount == frames)
-        #expect(output.samples.allSatisfy(\.isFinite))
+        let allFinite = output.samples.allSatisfy { $0.isFinite }
+        #expect(allFinite)
         // A mask can only remove energy (up to window-overlap rounding).
         let inputEnergy = input.samples.reduce(0) { $0 + Double($1 * $1) }
         let outputEnergy = output.samples.reduce(0) { $0 + Double($1 * $1) }
@@ -220,7 +221,8 @@ struct DemucsEngineTests {
         let output = try MappedPCMFile(creating: directory.appending(path: "out.f32"), channels: 1, frameCount: frames)
         let updates = Updates()
         try await Self.loadEngine().removeSpeech(input: input, output: output) { updates.append(PipelineProgress(stage: .removingSpeech, fraction: $0, track: 0, trackCount: 1)) }
-        #expect(output.samples.allSatisfy(\.isFinite))
+        let allFinite = output.samples.allSatisfy { $0.isFinite }
+        #expect(allFinite)
         #expect(output.samples.contains { $0 != 0 })
         #expect(updates.values.last?.fraction == 1)
     }

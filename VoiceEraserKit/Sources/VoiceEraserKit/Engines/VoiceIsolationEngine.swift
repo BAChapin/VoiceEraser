@@ -153,7 +153,7 @@ final class VoiceIsolator {
 
         let pullInput: AURenderPullInputBlock = { _, _, frameCount, _, inputData in
             let byteCount = Int(frameCount) * MemoryLayout<Float>.size
-            var buffers = UnsafeMutableAudioBufferListPointer(inputData)
+            let buffers = UnsafeMutableAudioBufferListPointer(inputData)
             for index in 0..<buffers.count {
                 if let data = buffers[index].mData {
                     data.copyMemory(from: source.value, byteCount: byteCount)
