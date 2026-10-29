@@ -1,0 +1,15 @@
+# Python environment for Scripts/convert-model.py and Scripts/make-dsp-fixtures.py.
+# demucs itself is installed separately with --no-deps: its metadata pins an
+# old torchaudio that conflicts with the torch version coremltools supports.
+#   pip install -r Scripts/requirements.txt && pip install --no-deps demucs==4.0.1
+torch==2.7.0
+torchaudio==2.7.0
+coremltools==9.0
+numpy>=1.26,<2.3
+einops==0.8.2
+julius==0.2.8
+openunmix==1.3.0
+dora-search==0.1.13
+omegaconf==2.4.0
+pyyaml>=6
+tqdm>=4
