@@ -1,0 +1,240 @@
+# Continuous integration for VoiceEraser.
+#
+# Runs on every push to `main` and on pull requests targeting it (see
+# CLAUDE.md, "CI Practices"; Show/Ask PRs need a green run before merge), and
+# is reused by release.yml:
+#   lint       - SwiftLint over the app and package sources
+#   ffmpeg     - builds the bundled ffmpeg/ffprobe (cached by script hash)
+#   model      - converts the Demucs model to Core ML and checks it against
+#                PyTorch (cached by script hash)
+#   unit-tests - VoiceEraserKit tests, including the integration tests that
+#                need FFmpeg, the model, and Apple Voice Isolation
+#   build      - Release app, ad-hoc signed, uploaded as an artifact
+#
+# No signing certificates, provisioning profiles, or secrets are used.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # macos-26 ships Xcode 26.0.1 ... 26.6. Pin one so toolchain upgrades on the
+  # runner image are a deliberate change here, not a surprise.
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  DERIVED_DATA_DIR: ${{ github.workspace }}/.derived-data
+  # SwiftLint release used by the lint job (portable_swiftlint.zip checksum).
+  SWIFTLINT_VERSION: 0.65.1
+  SWIFTLINT_SHA256: c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint (SwiftLint)
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The macos-26 arm64 image does not ship SwiftLint, so install the
+      # pinned portable release and verify it.
+      - name: Install SwiftLint ${{ env.SWIFTLINT_VERSION }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/swiftlint"
+          mkdir -p "$dir"
+          curl -sSL --fail --retry 3 \
+            -o "$dir/portable_swiftlint.zip" \
+            "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip"
+          echo "${SWIFTLINT_SHA256}  $dir/portable_swiftlint.zip" | shasum -a 256 --check
+          unzip -q -o "$dir/portable_swiftlint.zip" -d "$dir"
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: SwiftLint
+        run: swiftlint lint --strict --reporter github-actions-logging
+
+  ffmpeg:
+    name: Build FFmpeg
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache FFmpeg build
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Vendor/FFmpeg
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-xcode26.6-${{ hashFiles('Scripts/build-ffmpeg.sh') }}
+
+      - name: Build ffmpeg and ffprobe
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: Scripts/build-ffmpeg.sh
+
+      - name: Check binaries
+        run: |
+          Vendor/FFmpeg/bin/ffmpeg -hide_banner -version | head -1
+          Vendor/FFmpeg/bin/ffmpeg -hide_banner -encoders | grep -E ' (aac_at|libmp3lame|flac|opus) '
+
+      # Artifacts drop file modes, so ship the binaries as a tarball.
+      - name: Package
+        run: tar -czf "$RUNNER_TEMP/ffmpeg.tar.gz" -C Vendor FFmpeg
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg
+          path: ${{ runner.temp }}/ffmpeg.tar.gz
+          retention-days: 7
+
+  model:
+    name: Convert Demucs model
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache converted model
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            VoiceEraser/Resources/Models/HTDemucsVocals.mlpackage
+            .model-reference
+          key: model-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/convert-model.py', 'Scripts/requirements.txt') }}
+
+      - name: Set up Python
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: Scripts/requirements.txt
+
+      - name: Install conversion tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install -r Scripts/requirements.txt
+          python -m pip install --no-deps demucs==4.0.1
+
+      # Downloads the htdemucs_ft vocals weights, checks the wrapper against
+      # HTDemucs.forward, converts, and compares Core ML with PyTorch.
+      - name: Convert
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: python Scripts/convert-model.py --reference-dir .model-reference
+
+      - name: Package
+        run: tar -czf "$RUNNER_TEMP/model.tar.gz" VoiceEraser/Resources/Models/HTDemucsVocals.mlpackage .model-reference
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: model
+          path: ${{ runner.temp }}/model.tar.gz
+          retention-days: 7
+
+  unit-tests:
+    name: Unit and integration tests
+    needs: [ffmpeg, model]
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download build inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/inputs
+
+      - name: Unpack build inputs
+        run: |
+          mkdir -p Vendor
+          tar -xzf "$RUNNER_TEMP/inputs/ffmpeg/ffmpeg.tar.gz" -C Vendor
+          tar -xzf "$RUNNER_TEMP/inputs/model/model.tar.gz"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run VoiceEraserKit tests
+        working-directory: VoiceEraserKit
+        env:
+          VOICEERASER_FFMPEG_DIR: ${{ github.workspace }}/Vendor/FFmpeg/bin
+          VOICEERASER_MODEL: ${{ github.workspace }}/VoiceEraser/Resources/Models/HTDemucsVocals.mlpackage
+          VOICEERASER_MODEL_REFERENCE: ${{ github.workspace }}/.model-reference
+        run: swift test
+
+  build:
+    name: Build app (Release)
+    needs: [ffmpeg, model]
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download build inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/inputs
+
+      - name: Unpack build inputs
+        run: |
+          mkdir -p Vendor
+          tar -xzf "$RUNNER_TEMP/inputs/ffmpeg/ffmpeg.tar.gz" -C Vendor
+          tar -xzf "$RUNNER_TEMP/inputs/model/model.tar.gz"
+
+      # Ad-hoc signed ("-"): runs on the machine that downloads it after
+      # clearing quarantine, but isn't notarized.
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project VoiceEraser.xcodeproj \
+            -scheme VoiceEraser \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA_DIR" \
+            ARCHS=arm64 \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM= \
+            | xcbeautify --renderer github-actions
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          app="$DERIVED_DATA_DIR/Build/Products/Release/VoiceEraser.app"
+          test -x "$app/Contents/Helpers/ffmpeg"
+          test -x "$app/Contents/Helpers/ffprobe"
+          test -d "$app/Contents/Resources/HTDemucsVocals.mlmodelc"
+          "$app/Contents/Helpers/ffmpeg" -hide_banner -version | head -1
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$app/Contents/MacOS/VoiceEraser"
+
+      - name: Package app
+        run: ditto -c -k --keepParent "$DERIVED_DATA_DIR/Build/Products/Release/VoiceEraser.app" "$RUNNER_TEMP/VoiceEraser.zip"
+
+      - name: Upload app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: VoiceEraser-app
+          path: ${{ runner.temp }}/VoiceEraser.zip
+          retention-days: 14

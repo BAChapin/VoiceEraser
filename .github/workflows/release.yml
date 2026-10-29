@@ -1,0 +1,117 @@
+# Release pipeline for VoiceEraser.
+#
+# Runs when a tag matching `v*` is pushed (see CLAUDE.md, "CI Practices"):
+#   verify-ci - the tagged commit must be on `main` and have a successful
+#               CI (ci.yml) run; otherwise the pipeline stops here.
+#   tests     - the full CI workflow again on the tagged commit: lint, unit
+#               and integration tests (FFmpeg, Core ML model, Apple Voice
+#               Isolation), and the Release app build.
+#   release   - attaches the ad-hoc signed app from `tests` to a new GitHub
+#               Release. No notarization or other distribution.
+#
+# No signing certificates or secrets are used.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-ci:
+    name: Verify CI passed on the tagged commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the commit the tag points to
+        id: resolve
+        run: |
+          # Annotated tags point at a tag object; peel to the commit.
+          sha="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          echo "Tag ${GITHUB_REF_NAME} -> ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Require the commit to be on main
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::Commit $SHA is not on main. Tags are only released from main."
+            exit 1
+          fi
+
+      - name: Require a successful ci.yml run for the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          runs="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event == "push" and .head_branch == "main")] | length')"
+          echo "Successful CI runs for $SHA on main: $runs"
+          if [ "$runs" -lt 1 ]; then
+            echo "::error::No successful CI run found for $SHA. Wait for CI on main to pass, then re-tag."
+            exit 1
+          fi
+
+  tests:
+    name: Tests and app build
+    needs: verify-ci
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Create GitHub Release
+    needs: [verify-ci, tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download app
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: VoiceEraser-app
+          path: ${{ runner.temp }}/app
+
+      - name: Name and checksum
+        run: |
+          cd "$RUNNER_TEMP/app"
+          mv VoiceEraser.zip "VoiceEraser-${GITHUB_REF_NAME}-macos-arm64.zip"
+          sha256sum "VoiceEraser-${GITHUB_REF_NAME}-macos-arm64.zip" | tee "VoiceEraser-${GITHUB_REF_NAME}-macos-arm64.zip.sha256"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.verify-ci.outputs.sha }}
+        run: |
+          prerelease_flag=""
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease_flag="--prerelease" ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "VoiceEraser $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            $prerelease_flag \
+            "$RUNNER_TEMP/app/VoiceEraser-${GITHUB_REF_NAME}-macos-arm64.zip" \
+            "$RUNNER_TEMP/app/VoiceEraser-${GITHUB_REF_NAME}-macos-arm64.zip.sha256"
