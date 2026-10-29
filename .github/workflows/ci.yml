@@ -212,6 +212,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=macOS' \
             -derivedDataPath "$DERIVED_DATA_DIR" \
+            ARCHS=arm64 \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM= \

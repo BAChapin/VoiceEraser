@@ -187,8 +187,10 @@ public final class DemucsEngine: SpeechRemovalEngine, @unchecked Sendable {
         }
 
         switch array.dataType {
+        #if arch(arm64)
         case .float16:
             array.withUnsafeBufferPointer(ofType: Float16.self) { buffer in copy { Float(buffer[$0]) } }
+        #endif
         case .double:
             array.withUnsafeBufferPointer(ofType: Double.self) { buffer in copy { Float(buffer[$0]) } }
         default:
