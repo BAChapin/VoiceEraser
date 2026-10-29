@@ -10,6 +10,8 @@
 #   example Homebrew libraries) leaks into the binaries.
 # - Video is only ever stream-copied by VoiceEraser, but FFmpeg's native
 #   video encoders are left in; they cost a few MB and keep the build simple.
+# - The only input device is lavfi (generated test signals), which the
+#   integration tests use to make their input files.
 #
 # Usage: Scripts/build-ffmpeg.sh [output-dir]   (default: Vendor/FFmpeg)
 # Output: <output-dir>/bin/ffmpeg, <output-dir>/bin/ffprobe, <output-dir>/VERSION
@@ -84,7 +86,7 @@ tar -xJf "$work/ffmpeg.tar.xz" -C "$work"
     --enable-zlib --enable-bzlib --enable-iconv \
     --enable-libmp3lame \
     --disable-ffplay --disable-doc --disable-network --disable-debug \
-    --disable-indevs --disable-outdevs \
+    --disable-indevs --enable-indev=lavfi --disable-outdevs \
     --extra-cflags="$common_cflags -I$prefix/include" \
     --extra-ldflags="-arch $ARCH -mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET -L$prefix/lib" \
     --extra-libs="-liconv"

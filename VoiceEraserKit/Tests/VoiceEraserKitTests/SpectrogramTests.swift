@@ -75,17 +75,23 @@ struct SpectrogramTests {
     }
 
     /// At the model's real size the spectrogram has the shape the Core ML
-    /// model expects and inverts back to the input.
+    /// model expects and inverts back to the input away from the edges.
+    /// (`_spec` drops the Nyquist bin and the two outermost frames each side,
+    /// so HTDemucs' own round trip is only exact in the interior and for
+    /// signals without Nyquist content.)
     @Test func demucsModelSizeRoundTrip() {
         let length = DemucsEngine.segmentLength
-        var generator = SplitMix64(seed: 7)
-        let signal = (0..<length).map { _ in Float.random(in: -0.5...0.5, using: &generator) }
+        let signal = (0..<length).map { index in
+            let time = Float(index) / 44_100
+            return 0.3 * sin(2 * .pi * 220 * time) + 0.2 * sin(2 * .pi * 3_100 * time) + 0.1 * sin(2 * .pi * 9_000 * time)
+        }
         let spectrogram = DemucsSpectrogram()
         let forward = spectrogram.forward(signal)
         #expect(forward.bins == 2048)
         #expect(forward.frames == 336)
         let restored = spectrogram.inverse(forward, length: length)
-        let error = zip(restored, signal).map { abs($0 - $1) }.max() ?? .infinity
+        let interior = 4096..<(length - 4096)
+        let error = interior.map { abs(restored[$0] - signal[$0]) }.max() ?? .infinity
         #expect(error < 1e-3)
     }
 
