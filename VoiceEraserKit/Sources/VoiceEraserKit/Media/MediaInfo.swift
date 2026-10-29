@@ -137,54 +137,54 @@ public enum MediaProbe {
 /// ffprobe's JSON. Numeric values other than `index` and `channels` are
 /// reported as strings.
 private struct ProbeReport: Decodable {
-    struct Stream: Decodable {
-        var index: Int
-        var codecName: String?
-        var codecLongName: String?
-        var profile: String?
-        var codecType: String?
-        var sampleFmt: String?
-        var sampleRate: String?
-        var channels: Int?
-        var channelLayout: String?
-        var bitsPerRawSample: String?
-        var bitRate: String?
-        var startTime: String?
-        var duration: String?
-        var disposition: [String: Int]?
+    var streams: [ProbeStream]?
+    var format: ProbeFormat?
+}
 
-        enum CodingKeys: String, CodingKey {
-            case index
-            case codecName = "codec_name"
-            case codecLongName = "codec_long_name"
-            case profile
-            case codecType = "codec_type"
-            case sampleFmt = "sample_fmt"
-            case sampleRate = "sample_rate"
-            case channels
-            case channelLayout = "channel_layout"
-            case bitsPerRawSample = "bits_per_raw_sample"
-            case bitRate = "bit_rate"
-            case startTime = "start_time"
-            case duration
-            case disposition
-        }
+private struct ProbeStream: Decodable {
+    var index: Int
+    var codecName: String?
+    var codecLongName: String?
+    var profile: String?
+    var codecType: String?
+    var sampleFmt: String?
+    var sampleRate: String?
+    var channels: Int?
+    var channelLayout: String?
+    var bitsPerRawSample: String?
+    var bitRate: String?
+    var startTime: String?
+    var duration: String?
+    var disposition: [String: Int]?
+
+    enum CodingKeys: String, CodingKey {
+        case index
+        case codecName = "codec_name"
+        case codecLongName = "codec_long_name"
+        case profile
+        case codecType = "codec_type"
+        case sampleFmt = "sample_fmt"
+        case sampleRate = "sample_rate"
+        case channels
+        case channelLayout = "channel_layout"
+        case bitsPerRawSample = "bits_per_raw_sample"
+        case bitRate = "bit_rate"
+        case startTime = "start_time"
+        case duration
+        case disposition
     }
+}
 
-    struct Format: Decodable {
-        var formatName: String?
-        var formatLongName: String?
-        var startTime: String?
-        var duration: String?
+private struct ProbeFormat: Decodable {
+    var formatName: String?
+    var formatLongName: String?
+    var startTime: String?
+    var duration: String?
 
-        enum CodingKeys: String, CodingKey {
-            case formatName = "format_name"
-            case formatLongName = "format_long_name"
-            case startTime = "start_time"
-            case duration
-        }
+    enum CodingKeys: String, CodingKey {
+        case formatName = "format_name"
+        case formatLongName = "format_long_name"
+        case startTime = "start_time"
+        case duration
     }
-
-    var streams: [Stream]?
-    var format: Format?
 }
