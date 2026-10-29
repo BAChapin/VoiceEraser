@@ -2,7 +2,7 @@
 
 Tracks progress against `SPEC.md`. Updated as milestones land.
 
-**Status:** Milestone 1 (first working app) implemented. Verified locally on Linux only where possible (see Verification log); everything that needs macOS is verified by CI. Not yet run by hand on a Mac.
+**Status:** Milestone 1 (first working app) implemented. CI green on macOS 26 / Xcode 26.6: lint, FFmpeg build, model conversion, all 38 package tests (including the FFmpeg, Core ML, and Voice Isolation integration tests), and the Release app build. Not yet run by hand on a Mac.
 **Last updated:** 2026-10-29
 
 ## Architecture summary
@@ -68,7 +68,7 @@ ffmpeg mux: copy video/subtitles/attachments/metadata from input,
 ### Verification log
 
 - 2026-10-29 (Linux container, no Swift toolchain): model conversion with random weights succeeds with the pinned `Scripts/requirements.txt`; wrapper equals `HTDemucs.forward` exactly; a NumPy port of the Swift STFT/iSTFT/Demucs spectrogram matches PyTorch to ≤ 3e-7; segmenting port matches `apply_model` to 2.4e-8; the decode/mux argument lists (emulated) work with FFmpeg 6.1 on MP4 (2 audio tracks, languages, default flags, title), MP3, 24-bit FLAC, and MKV with 5.1 Opus and subtitles.
-- Swift compilation, tests, and the app build: CI only (see the PR).
+- 2026-10-29 (CI, macos-26 runner, Xcode 26.6, PR #1): Core ML at fp32 matches PyTorch to ≥ 40 dB SNR on both outputs (fp16 was 23.1 dB); the Swift STFT + Core ML + iSTFT path matches PyTorch's vocals on the reference segment (≥ 20 dB SNR); Voice Isolation renders through AVAudioEngine; 38/38 tests pass; the Release app bundle contains the signed FFmpeg helpers and the compiled model and passes `codesign --verify --deep --strict`.
 
 ### Known limitations
 
