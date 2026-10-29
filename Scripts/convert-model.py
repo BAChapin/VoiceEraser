@@ -185,7 +185,9 @@ def convert(core, mix, spec, output):
             ct.TensorType(name="vocals_wave", dtype=np.float32),
         ],
         minimum_deployment_target=ct.target.macOS15,
-        compute_precision=ct.precision.FLOAT16,
+        # fp16 measured 23 dB SNR against PyTorch on the vocals spectrogram;
+        # fp32 keeps the High Quality engine faithful (runs on GPU/CPU).
+        compute_precision=ct.precision.FLOAT32,
     )
     mlmodel.short_description = "Hybrid Transformer Demucs (htdemucs_ft vocals) without STFT, for VoiceEraser."
     mlmodel.author = "Meta AI Research (Demucs, MIT License); converted for VoiceEraser"
@@ -199,6 +201,7 @@ def convert(core, mix, spec, output):
 
 def check_coreml(mlmodel, core, mix, spec):
     """Runs the converted model and compares it with PyTorch (macOS only)."""
+    failures = []
     with torch.no_grad():
         ref_spec, ref_wave = core(mix, spec)
     result = mlmodel.predict({"mix": mix.numpy(), "spec": spec.numpy()})
@@ -207,8 +210,10 @@ def check_coreml(mlmodel, core, mix, spec):
         ref = ref.numpy()
         snr = 10 * math.log10(float((ref**2).sum()) / max(float(((ref - got) ** 2).sum()), 1e-20))
         print(f"Core ML vs PyTorch {name}: SNR {snr:.1f} dB")
-        if snr < 25:
-            sys.exit(f"error: Core ML {name} deviates from PyTorch (SNR {snr:.1f} dB < 25 dB)")
+        if snr < 40:
+            failures.append(f"{name} SNR {snr:.1f} dB < 40 dB")
+    if failures:
+        sys.exit("error: Core ML deviates from PyTorch: " + "; ".join(failures))
 
 
 def write_reference(model, core, mix, spec, directory):
