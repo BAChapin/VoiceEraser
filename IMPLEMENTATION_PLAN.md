@@ -2,8 +2,8 @@
 
 Tracks progress against `SPEC.md`. Updated as milestones land.
 
-**Status:** Milestone 1 (first working app) implemented. CI green on macOS 26 / Xcode 26.6: lint, FFmpeg build, model conversion, all 38 package tests (including the FFmpeg, Core ML, and Voice Isolation integration tests), and the Release app build. Not yet run by hand on a Mac.
-**Last updated:** 2026-10-29
+**Status:** Milestone 2 (batch processing) implemented; CI is the build/test gate (see the PR). Milestone 1 CI green on macOS 26 / Xcode 26.6: lint, FFmpeg build, model conversion, all 38 package tests (including the FFmpeg, Core ML, and Voice Isolation integration tests), and the Release app build. Not yet run by hand on a Mac.
+**Last updated:** 2026-10-30
 
 ## Architecture summary
 
@@ -14,8 +14,8 @@ One Xcode project (`VoiceEraser.xcodeproj`, a SwiftUI macOS app) plus one local 
 | Media (FFmpeg) | `FFmpegTools` (locates the bundled binaries), `MediaProbe`/`MediaInfo`/`MediaStream` (ffprobe JSON), `AudioEncodingPlan` (codec/bitrate/rate choice per track), `FFmpegCommands` (decode and mux argument lists), `ProcessRunner` |
 | DSP | `ShortTimeFourierTransform` (matches `torch.stft`/`torch.istft`), `DemucsSpectrogram` (`HTDemucs._spec`/`_ispec`), `SegmentPlan` (`apply_model` segmenting and crossfade weights) |
 | Engines | `SpeechRemovalEngine` protocol; `DemucsEngine` (Core ML); `VoiceIsolationEngine` (`AUSoundIsolation` + `SpectralMask`) |
-| Pipeline | `SpeechRemovalPipeline` (probe → decode → engine → mux), `ScratchOutput` (atomic replace / save-as), `MappedPCMFile` (memory-mapped raw PCM), `ProgressThrottle` |
-| App | `AppModel` (state, open/save panels, confirmation), `ContentView`, `FileDetailView`, `ProcessingStatusView` |
+| Pipeline | `SpeechRemovalPipeline` (probe → decode → engine → mux), `ScratchOutput` (atomic replace / save-as), `MediaFileCollector` (files and folders → media files), `OutputNaming` (collision-free output names), `MappedPCMFile` (memory-mapped raw PCM), `ProgressThrottle` |
+| App | `AppModel` (batch list, settings, sequential runs, panels, confirmation), `BatchItem`, `ContentView`, `BatchView`, `BatchItemRow` |
 
 ### Data flow
 
@@ -77,7 +77,31 @@ ffmpeg mux: copy video/subtitles/attachments/metadata from input,
 - Apple Voice Isolation quality is limited: it is a voice *enhancer*, and masking with its output leaves residual speech, especially in quiet passages.
 - Tracks with more than two channels are processed by Demucs in channel pairs (for 5.1: FL/FR, FC/LFE, SL/SR), which is a stereo model applied off-label to non-stereo pairs.
 - The app is ad-hoc signed in CI, not notarized: downloaded builds need the quarantine attribute cleared.
-- Only the first file of a multi-file drop or Open With is used.
+- ~~Only the first file of a multi-file drop or Open With is used.~~ Fixed in Milestone 2.
+
+## Milestone 2 — Batch processing
+
+### Completed (2026-10-30)
+
+- The window holds a list of files. Add files or folders (folders are searched recursively for audio/video) by panel, drop, Dock or Open With; duplicates are skipped; unreadable files and files without audio are marked failed.
+- One engine and one output setting for the whole batch. **Replace original files** asks once for the batch. Otherwise results go to one output folder (asked for on the first run if none is chosen) as `<name> (No Speech).<ext>`, numbered instead of overwriting.
+- Files run one after another; a failure marks that file and the batch continues. Per-row stage and progress, overall "file X of N" progress, Cancel (finished files stay finished, the rest return to ready), end-of-run summary with Show in Finder, Process Again for finished or failed files.
+
+### Technical decisions
+
+1. **Sequential, not parallel.** Demucs already saturates the GPU and each track's decoded PCM can be over a gigabyte; one file at a time keeps memory and disk use the same as a single run. The loaded Demucs model is reused across the batch.
+2. **Settings are captured when a run starts.** Engine, replace mode, and output folder can't change mid-run (the controls are disabled), so every file in a run is handled the same way.
+3. **Never overwrite in save mode.** `OutputNaming` checks the folder before each move, so two inputs with the same name (from different folders) get `(No Speech)` and `(No Speech 2)`.
+
+### Testing status
+
+- Unit tests: output naming (free name, numbering, no extension); folder expansion (recursive, hidden files skipped, non-media skipped in folders, explicit files kept, duplicates dropped, order kept); extension-based media detection.
+- The batch UI and `AppModel` have no automated tests yet (no UI test target); they are covered by the app build in CI and manual use.
+
+### Known limitations
+
+- Moving or renaming a listed file before it's processed makes it fail at decode time.
+- A run's output folder must be writable; if it isn't, each file fails with the move error.
 
 ## Next development steps
 
