@@ -9,15 +9,15 @@ struct VoiceEraserApp: App {
     var body: some Scene {
         Window("VoiceEraser", id: "main") {
             ContentView(model: model)
-                .frame(minWidth: 520, minHeight: 460)
+                .frame(minWidth: 620, minHeight: 520)
                 .onAppear { appDelegate.model = model }
         }
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open…") { model.presentOpenPanel() }
+                Button("Add Files…") { model.presentOpenPanel() }
                     .keyboardShortcut("o")
-                    .disabled(model.isBusy)
+                    .disabled(model.isRunning)
             }
         }
     }
@@ -28,20 +28,19 @@ struct VoiceEraserApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: AppModel? {
         didSet {
-            guard let model, let url = pendingURL else { return }
-            pendingURL = nil
-            model.open(url)
+            guard let model, !pendingURLs.isEmpty else { return }
+            model.add(pendingURLs)
+            pendingURLs = []
         }
     }
 
-    private var pendingURL: URL?
+    private var pendingURLs: [URL] = []
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first else { return }
         if let model {
-            model.open(url)
+            model.add(urls)
         } else {
-            pendingURL = url
+            pendingURLs += urls
         }
     }
 

@@ -7,21 +7,15 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            switch model.phase {
-            case .empty:
+            if model.items.isEmpty {
                 DropZoneView(isTargeted: isDropTargeted) { model.presentOpenPanel() }
-            case let .loading(url):
-                ProgressView("Reading “\(url.lastPathComponent)”…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .ready, .processing, .awaitingSave, .done:
-                if let media = model.media {
-                    FileDetailView(model: model, media: media)
-                }
+            } else {
+                BatchView(model: model, isDropTargeted: isDropTargeted)
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first, !model.isBusy else { return false }
-            model.open(url)
+            guard !urls.isEmpty, !model.isRunning else { return false }
+            model.add(urls)
             return true
         } isTargeted: { isDropTargeted = $0 }
         .alert(
@@ -55,12 +49,12 @@ struct DropZoneView: View {
             Image(systemName: "waveform.badge.minus")
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(isTargeted ? Color.accentColor : .secondary)
-            Text("Drop a video or audio file here")
+            Text("Drop video or audio files here")
                 .font(.title3)
-            Text("VoiceEraser removes speech and keeps music, ambience, and effects.")
+            Text("VoiceEraser removes speech and keeps music, ambience, and effects. Add as many files or folders as you like.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Choose File…", action: choose)
+            Button("Choose Files…", action: choose)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
         }

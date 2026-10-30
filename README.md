@@ -2,9 +2,9 @@
 
 A macOS app that removes human speech from a video or audio file and keeps the music, ambience, and sound effects.
 
-- Open any file FFmpeg can read (MP4, MOV, MKV, WebM, MP3, M4A, WAV, FLAC, …).
+- Add one file or a whole batch (files or folders) of anything FFmpeg can read (MP4, MOV, MKV, WebM, MP3, M4A, WAV, FLAC, …).
 - Choose **High Quality (Demucs)** (on-device neural source separation) or **Fast (Apple Voice Isolation)**.
-- Either replace the audio in the original file (after a confirmation) or save a new copy. Video and other streams are copied untouched.
+- Either replace the audio in the original files (after one confirmation) or save new copies to a folder of your choice. Video and other streams are copied untouched.
 - Everything runs offline.
 
 Requires macOS 26 on Apple Silicon. See `SPEC.md` for the product spec and `IMPLEMENTATION_PLAN.md` for design decisions and status.
